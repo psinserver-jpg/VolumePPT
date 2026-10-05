@@ -3,6 +3,7 @@ name: Build VolumePPT
 on:
   push:
     paths: ["android/**", "pc/**", ".github/workflows/build.yml"]
+    branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
 
