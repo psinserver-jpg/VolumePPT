@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>VolumePPT 리모컨</title>
+<style>
+  :root { --bg:#111; --fg:#eee; --btn:#2a2a2a; --accent:#4f8cff; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg);
+              font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
+  body { display:flex; flex-direction:column; padding:16px; gap:12px; }
+  header { text-align:center; font-size:14px; opacity:.7; }
+  button { flex:1; border:0; border-radius:20px; background:var(--btn); color:var(--fg);
+           font-size:28px; font-weight:700; }
+  button:active { background:var(--accent); }
+  #next { flex:2; }
+  #status { text-align:center; font-size:13px; min-height:1.2em; }
+</style>
+</head>
+<body>
+  <header>VolumePPT 웹 리모컨 · 볼륨키는 앱에서 지원됩니다</header>
+  <button id="next">다음 ▶</button>
+  <button id="prev">◀ 이전</button>
+  <div id="status"></div>
+<script>
+  const qs = new URLSearchParams(location.search);
+  let token = qs.get("token") || "";
+  try { if (token) localStorage.setItem("token", token); else token = localStorage.getItem("token") || ""; } catch (e) {}
+  const status = document.getElementById("status");
+
+  async function send(action) {
+    if (navigator.vibrate) navigator.vibrate(30);
+    try {
+      const r = await fetch("/" + action + (token ? "?token=" + encodeURIComponent(token) : ""));
+      status.textContent = r.ok ? (action === "next" ? "다음 ▶" : "◀ 이전") : "오류: " + r.status;
+    } catch (e) {
+      status.textContent = "PC에 연결할 수 없습니다";
+    }
+  }
+  document.getElementById("next").onclick = () => send("next");
+  document.getElementById("prev").onclick = () => send("prev");
+
+  // 일부 안드로이드 브라우저 / 블루투스 셔터 리모컨은 볼륨키를 키 이벤트로 전달함
+  document.addEventListener("keydown", (e) => {
+    if (["AudioVolumeUp", "VolumeUp", "ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); send("next"); }
+    else if (["AudioVolumeDown", "VolumeDown", "ArrowLeft", "PageUp"].includes(e.key)) { e.preventDefault(); send("prev"); }
+  });
+</script>
+</body>
+</html>
