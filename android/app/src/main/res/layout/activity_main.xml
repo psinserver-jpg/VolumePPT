@@ -26,8 +26,8 @@
         android:id="@+id/token"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:hint="비밀번호 (서버에 --token 을 설정한 경우만)"
-        android:inputType="textPassword"
+        android:hint="PIN (PC 화면에 표시된 4자리)"
+        android:inputType="number"
         android:singleLine="true"
         android:textColor="#FFFFFF"
         android:textColorHint="#555555" />

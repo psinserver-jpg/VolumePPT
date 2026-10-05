@@ -20,6 +20,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- PC 실행기의 QR → 웹 화면의 [앱으로 연결] 버튼: volumeppt://connect?host=...&token=... -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="volumeppt" android:host="connect" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

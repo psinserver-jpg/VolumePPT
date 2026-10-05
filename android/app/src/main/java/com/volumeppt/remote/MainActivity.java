@@ -2,7 +2,9 @@ package com.volumeppt.remote;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Vibrator;
 import android.view.KeyEvent;
@@ -54,6 +56,28 @@ public class MainActivity extends Activity {
         });
         findViewById(R.id.next).setOnClickListener(v -> send("next"));
         findViewById(R.id.prev).setOnClickListener(v -> send("prev"));
+
+        handleConnectLink(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleConnectLink(intent);
+    }
+
+    /** volumeppt://connect?host=192.168.0.10:8765&token=1234 로 열리면 주소와 PIN 을 자동 입력 */
+    private void handleConnectLink(Intent intent) {
+        Uri data = intent == null ? null : intent.getData();
+        if (data == null || !"volumeppt".equals(data.getScheme())) return;
+        String host = data.getQueryParameter("host");
+        String token = data.getQueryParameter("token");
+        if (host == null || host.isEmpty()) return;
+        hostInput.setText(host);
+        tokenInput.setText(token == null ? "" : token);
+        saveSettings();
+        send("ping");
     }
 
     @Override
@@ -127,7 +151,7 @@ public class MainActivity extends Activity {
                     message = action.equals("ping") ? "✅ 연결됨: " + host
                             : action.equals("next") ? "다음 ▶" : "◀ 이전";
                 } else if (code == 403) {
-                    message = "❌ 비밀번호가 틀렸습니다";
+                    message = "❌ PIN 이 맞지 않습니다\nPC 화면의 QR 을 다시 찍어 주세요";
                 } else {
                     message = "❌ 오류 " + code;
                 }

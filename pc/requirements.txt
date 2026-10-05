@@ -1,1 +1,2 @@
-pynput>=1.7
+qrcode>=7.4
+pynput>=1.7; sys_platform != "win32"

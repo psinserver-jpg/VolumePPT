@@ -7,3 +7,7 @@ local.properties
 .idea/
 ios/*.xcodeproj/
 .DS_Store
+app.apk
+pc/build/
+pc/dist/
+*.spec

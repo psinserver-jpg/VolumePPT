@@ -23,7 +23,8 @@ struct ContentView: View {
                     .disableAutocorrection(true)
                     .textFieldStyle(.roundedBorder)
                     .focused($editing)
-                SecureField("비밀번호 (서버에 --token 을 설정한 경우만)", text: $token)
+                TextField("PIN (PC 화면에 표시된 4자리)", text: $token)
+                    .keyboardType(.numberPad)
                     .textFieldStyle(.roundedBorder)
                     .focused($editing)
                 Button("연결 테스트") {
@@ -58,6 +59,16 @@ struct ContentView: View {
         .onChange(of: scenePhase) { phase in
             if phase == .active { volume.start() }
         }
+        // PC 실행기의 QR → 웹 화면의 [앱으로 연결]: volumeppt://connect?host=...&token=...
+        .onOpenURL { url in
+            guard url.scheme == "volumeppt",
+                  let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems,
+                  let newHost = items.first(where: { $0.name == "host" })?.value, !newHost.isEmpty
+            else { return }
+            host = newHost
+            token = items.first(where: { $0.name == "token" })?.value ?? ""
+            send("ping")
+        }
     }
 
     private func bigButton(_ title: String, action: @escaping () -> Void) -> some View {
@@ -85,7 +96,7 @@ struct ContentView: View {
             case .success(200):
                 status = action == "ping" ? "✅ 연결됨: \(target)" : (action == "next" ? "다음 ▶" : "◀ 이전")
             case .success(403):
-                status = "❌ 비밀번호가 틀렸습니다"
+                status = "❌ PIN 이 맞지 않습니다\nPC 화면의 QR 을 다시 찍어 주세요"
             case .success(let code):
                 status = "❌ 오류 \(code)"
             case .failure:
