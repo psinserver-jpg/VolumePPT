@@ -225,6 +225,20 @@ REMOTE_HTML = """<!doctype html>
           font-size:14px; padding:12px 8px; text-align:center; text-decoration:none; }
   .tool.on { background:var(--accent); }
   .hint { font-size:12px; color:var(--muted); text-align:center; line-height:1.5; min-height:1.5em; }
+  /* 아이폰 단축어 설치 패널 */
+  #ios { position:fixed; inset:0; background:var(--bg); overflow-y:auto; z-index:10;
+         padding:max(16px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); }
+  #ios h2 { font-size:20px; margin:4px 0 6px; }
+  #ios p { color:var(--muted); font-size:14px; line-height:1.55; margin:0 0 14px; }
+  #ios ol { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:12px; }
+  #ios li { background:var(--card); border-radius:16px; padding:14px; }
+  #ios li > b { display:block; font-size:15px; margin-bottom:4px; }
+  #ios li span { display:block; color:var(--muted); font-size:13px; line-height:1.5; }
+  #ios .go { display:block; margin-top:10px; padding:12px; border-radius:12px; background:var(--accent);
+             color:#fff; text-align:center; text-decoration:none; font-weight:600; font-size:15px; }
+  #ios .go.sub { background:#2c313b; }
+  #ios .close { width:100%; margin-top:16px; padding:14px; border:0; border-radius:14px; background:#2c313b;
+                color:var(--fg); font:inherit; font-size:15px; }
 </style>
 </head>
 <body>
@@ -239,8 +253,33 @@ REMOTE_HTML = """<!doctype html>
   <div class="tools">
     <button class="tool" id="media">🔒 잠금화면 · 이어폰 버튼 켜기</button>
     <a class="tool" id="apk" href="/app.apk" hidden>볼륨버튼 앱(선택)</a>
+    <button class="tool" id="ios-open" hidden>⚡ 동작 버튼 설정</button>
   </div>
   <div class="hint" id="hint">화면을 탭하거나 밀어서 슬라이드를 넘기세요</div>
+
+  <div id="ios" hidden>
+    <h2>⚡ 아이폰 버튼으로 넘기기</h2>
+    <p>단축어 2개를 설치하면 <b>동작 버튼</b>이나 <b>뒷면 탭</b>으로 슬라이드를 넘길 수 있습니다. 처음 한 번만 하면 됩니다.</p>
+    <ol>
+      <li><b>① 단축어 2개 설치</b>
+        <span>버튼을 누르고 <b>다운로드</b> → 위쪽 ⬇︎ 에서 파일 열기 → <b>단축어 추가</b>. 이름은 바꾸지 마세요.</span>
+        <a class="go" href="__SC_NEXT__">VolumePPT-Next (다음) 설치</a>
+        <a class="go" href="__SC_PREV__">VolumePPT-Prev (이전) 설치</a>
+      </li>
+      <li><b>② 이 PC 로 설정</b>
+        <span>단축어 앱이 열리며 이 PC 의 주소와 PIN 이 저장됩니다. "설정 완료" 알림이 뜨면 성공입니다. 파일 접근을 물으면 <b>허용</b>하세요.</span>
+        <a class="go" id="sc-setup" href="#">이 PC 로 설정하기</a>
+      </li>
+      <li><b>③ 버튼에 연결</b>
+        <span><b>설정 → 동작 버튼 → 단축어</b> → VolumePPT-Next<br>
+              <b>설정 → 손쉬운 사용 → 터치 → 뒷면 탭 → 이중 탭</b> → VolumePPT-Prev<br>
+              (Apple 정책상 이 단계는 직접 해야 합니다)</span>
+        <a class="go sub" href="App-prefs:">설정 앱 열기</a>
+      </li>
+    </ol>
+    <p style="margin-top:14px">PC 주소나 PIN 이 바뀌면 ② 만 다시 누르면 됩니다.</p>
+    <button class="close" id="ios-close">닫기</button>
+  </div>
 
 <script>
   // ── 설정 ──────────────────────────────────────────────
@@ -338,11 +377,27 @@ REMOTE_HTML = """<!doctype html>
     $("hint").textContent = "화면을 꺼도 잠금화면의 ⏭ ⏮ 또는 이어폰 버튼으로 넘길 수 있습니다";
   }
   $("media").addEventListener("click", toggleMedia);
+
+  // ── 아이폰 단축어 (동작 버튼 · 뒷면 탭) ─────────────────
+  // 단축어는 "http://PC주소:포트/ACTION?token=PIN" 을 저장해 두고 ACTION 을 next/prev 로 바꿔 호출한다.
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (isIOS) {
+    $("ios-open").hidden = false;
+    const template = location.protocol + "//" + location.host + "/ACTION" + tq();
+    $("sc-setup").href = "shortcuts://run-shortcut?name=" + encodeURIComponent("VolumePPT-Next") +
+                         "&input=text&text=" + encodeURIComponent(template);
+    $("ios-open").addEventListener("click", () => { $("ios").hidden = false; });
+    $("ios-close").addEventListener("click", () => { $("ios").hidden = true; });
+  }
 </script>
 </body>
 </html>
 """
 
+
+# 아이폰 단축어 (Apple 서명본, GitHub Releases 에 빌드마다 올라감)
+SHORTCUT_URL = "https://github.com/psinserver-jpg/VolumePPT/releases/latest/download/VolumePPT-{}.shortcut"
 
 MANIFEST = json.dumps({
     "name": "VolumePPT 리모컨",
@@ -431,7 +486,9 @@ class RemoteServer:
         client = req.client_address[0]
 
         if path in ("/", "/index.html"):
-            html = REMOTE_HTML.replace("__HAS_APK__", "true" if self.apk_path else "false")
+            html = (REMOTE_HTML.replace("__HAS_APK__", "true" if self.apk_path else "false")
+                    .replace("__SC_NEXT__", SHORTCUT_URL.format("Next"))
+                    .replace("__SC_PREV__", SHORTCUT_URL.format("Prev")))
             return req._reply(200, html, "text/html; charset=utf-8")
 
         if path == "/manifest.json":

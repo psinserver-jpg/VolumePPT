@@ -75,8 +75,6 @@ jobs:
           name: VolumePPT-Mac
           path: pc/dist/VolumePPT-mac.zip
 
-  # main 에 반영되거나, 태그를 올리거나, Actions 에서 직접 실행하면 Releases 에 올린다.
-  # README 의 다운로드 링크(releases/latest/download/...)가 항상 최신 파일을 가리키게 된다.
   # 아이폰 단축어: iOS 15 이상은 Apple 서명이 된 단축어만 가져올 수 있어서 Mac 에서 서명한다
   shortcuts:
     runs-on: macos-latest
@@ -96,7 +94,9 @@ jobs:
           name: VolumePPT-Shortcuts
           path: signed/*.shortcut
 
-
+  # main 에 반영되거나, 태그를 올리거나, Actions 에서 직접 실행하면 Releases 에 올린다.
+  # README 의 다운로드 링크(releases/latest/download/...)가 항상 최신 파일을 가리키게 된다.
+  release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     needs: [android, windows, macos, shortcuts]
     runs-on: ubuntu-latest
@@ -115,5 +115,5 @@ jobs:
             VolumePPT.exe
             VolumePPT-mac.zip
             VolumePPT.apk
-            VolumePPT-next.shortcut
-            VolumePPT-prev.shortcut
+            VolumePPT-Next.shortcut
+            VolumePPT-Prev.shortcut

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""아이폰 단축어 파일(VolumePPT 다음 / VolumePPT 이전) 생성기.
+"""아이폰 단축어 파일(VolumePPT-Next / VolumePPT-Prev) 생성기.
 
 두 단축어는 사용자마다 다른 PC 주소/PIN 을 담지 않는 '공용' 단축어다.
 주소는 처음 한 번 웹 리모컨의 [이 PC 로 설정] 버튼이 넘겨주는 값을
@@ -21,9 +21,11 @@ import sys
 import uuid
 
 CONFIG_FILE = "VolumePPT.txt"
+# 가져온 단축어의 이름은 파일 이름을 따르므로 파일 이름과 같게 맞춘다
+# (GitHub Releases 는 파일 이름의 한글·공백을 바꿔 버리므로 영문으로)
 SHORTCUTS = {
-    "next": "VolumePPT 다음",
-    "prev": "VolumePPT 이전",
+    "next": "VolumePPT-Next",
+    "prev": "VolumePPT-Prev",
 }
 
 
@@ -116,7 +118,7 @@ def build(action):
 def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     for action in SHORTCUTS:
-        path = os.path.join(out_dir, f"VolumePPT-{action}.shortcut")
+        path = os.path.join(out_dir, f"{SHORTCUTS[action]}.shortcut")
         with open(path, "wb") as f:
             plistlib.dump(build(action), f, fmt=plistlib.FMT_BINARY)
         print(path)
