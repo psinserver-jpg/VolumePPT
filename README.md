@@ -154,12 +154,8 @@ python VolumePPT.py --nogui      # 창 없이 실행 (터미널에 QR 표시)
 ### 새 버전 배포
 
 `android/`, `pc/` 를 바꿔 푸시하면 GitHub Actions 가 안드로이드 APK → (APK 를 포함한) Windows exe · Mac app 순서로 빌드합니다.
-버전 태그를 푸시하면 세 파일이 **Releases** 에 올라가고, 위의 다운로드 링크가 자동으로 새 버전을 가리킵니다.
-
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
+**`main` 에 반영되면** 세 파일이 자동으로 **Releases** 에 새 버전(`v1.0.N`)으로 올라가고, 위의 다운로드 링크가 자동으로 새 버전을 가리킵니다.
+Actions 탭에서 *Build VolumePPT → Run workflow* 로 직접 실행하거나 `v*` 태그를 푸시해도 릴리스됩니다.
 
 ### 아이폰 볼륨버튼 앱 빌드
 
