@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+ios/*.xcodeproj/
+.DS_Store
+app.apk
+pc/build/
+pc/dist/
+*.spec
