@@ -2,7 +2,7 @@ name: Build VolumePPT
 
 on:
   push:
-    paths: ["android/**", "pc/**", "shortcuts/**", ".github/workflows/build.yml"]
+    paths: ["android/**", "pc/**", ".github/workflows/build.yml"]
     branches: ["**"]
     tags: ["v*"]
   workflow_dispatch:
@@ -75,30 +75,11 @@ jobs:
           name: VolumePPT-Mac
           path: pc/dist/VolumePPT-mac.zip
 
-  # 아이폰 단축어: iOS 15 이상은 Apple 서명이 된 단축어만 가져올 수 있어서 Mac 에서 서명한다
-  shortcuts:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build and sign shortcuts
-        run: |
-          sw_vers
-          python3 shortcuts/make_shortcuts.py build
-          mkdir -p signed
-          for f in build/*.shortcut; do
-            shortcuts sign --mode anyone --input "$f" --output "signed/$(basename "$f")"
-          done
-          ls -la signed
-      - uses: actions/upload-artifact@v4
-        with:
-          name: VolumePPT-Shortcuts
-          path: signed/*.shortcut
-
   # main 에 반영되거나, 태그를 올리거나, Actions 에서 직접 실행하면 Releases 에 올린다.
   # README 의 다운로드 링크(releases/latest/download/...)가 항상 최신 파일을 가리키게 된다.
   release:
     if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
-    needs: [android, windows, macos, shortcuts]
+    needs: [android, windows, macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -115,5 +96,3 @@ jobs:
             VolumePPT.exe
             VolumePPT-mac.zip
             VolumePPT.apk
-            VolumePPT-Next.shortcut
-            VolumePPT-Prev.shortcut

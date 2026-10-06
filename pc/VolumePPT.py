@@ -237,6 +237,7 @@ REMOTE_HTML = """<!doctype html>
   #ios .go { display:block; margin-top:10px; padding:12px; border-radius:12px; background:var(--accent);
              color:#fff; text-align:center; text-decoration:none; font-weight:600; font-size:15px; }
   #ios .go.sub { background:#2c313b; }
+  #copy-msg { -webkit-user-select:text; user-select:text; white-space:pre-line; word-break:break-all; font-size:13px; }
   #ios .close { width:100%; margin-top:16px; padding:14px; border:0; border-radius:14px; background:#2c313b;
                 color:var(--fg); font:inherit; font-size:15px; }
 </style>
@@ -259,25 +260,29 @@ REMOTE_HTML = """<!doctype html>
 
   <div id="ios" hidden>
     <h2>⚡ 아이폰 버튼으로 넘기기</h2>
-    <p>단축어 2개를 설치하면 <b>동작 버튼</b>이나 <b>뒷면 탭</b>으로 슬라이드를 넘길 수 있습니다. 처음 한 번만 하면 됩니다.</p>
+    <p>단축어 2개를 만들어 두면 <b>동작 버튼</b>이나 <b>뒷면 탭</b>으로 슬라이드를 넘길 수 있습니다. 처음 한 번만 하면 됩니다 (단축어당 30초).</p>
     <ol>
-      <li><b>① 단축어 2개 설치</b>
-        <span>버튼을 누르고 <b>다운로드</b> → 위쪽 ⬇︎ 에서 파일 열기 → <b>단축어 추가</b>. 이름은 바꾸지 마세요.</span>
-        <a class="go" href="__SC_NEXT__">VolumePPT-Next (다음) 설치</a>
-        <a class="go" href="__SC_PREV__">VolumePPT-Prev (이전) 설치</a>
+      <li><b>① 「다음」 단축어 만들기</b>
+        <span>1. 아래 <b>[주소 복사]</b> → <b>[단축어 앱 열기]</b><br>
+              2. <b>동작 추가</b> → 검색창에 <b>URL</b> → <b>URL 내용 가져오기</b><br>
+              3. 파란 <b>URL</b> 글자를 눌러 지우고 <b>붙여넣기</b><br>
+              4. 맨 위 이름을 <b>PPT 다음</b> 으로 바꾸고 <b>완료</b></span>
+        <a class="go" href="#" data-copy="next">다음 주소 복사</a>
+        <a class="go sub" href="shortcuts://create-shortcut">단축어 앱 열기</a>
       </li>
-      <li><b>② 이 PC 로 설정</b>
-        <span>단축어 앱이 열리며 이 PC 의 주소와 PIN 이 저장됩니다. "설정 완료" 알림이 뜨면 성공입니다. 파일 접근을 물으면 <b>허용</b>하세요.</span>
-        <a class="go" id="sc-setup" href="#">이 PC 로 설정하기</a>
+      <li><b>② 「이전」 단축어 만들기</b>
+        <span>같은 방법으로, 이름은 <b>PPT 이전</b></span>
+        <a class="go" href="#" data-copy="prev">이전 주소 복사</a>
+        <a class="go sub" href="shortcuts://create-shortcut">단축어 앱 열기</a>
       </li>
       <li><b>③ 버튼에 연결</b>
-        <span><b>설정 → 동작 버튼 → 단축어</b> → VolumePPT-Next<br>
-              <b>설정 → 손쉬운 사용 → 터치 → 뒷면 탭 → 이중 탭</b> → VolumePPT-Prev<br>
-              (Apple 정책상 이 단계는 직접 해야 합니다)</span>
-        <a class="go sub" href="App-prefs:">설정 앱 열기</a>
+        <span><b>설정 → 동작 버튼 → 단축어</b> → PPT 다음<br>
+              <b>설정 → 손쉬운 사용 → 터치 → 뒷면 탭 → 이중 탭</b> → PPT 이전</span>
       </li>
     </ol>
-    <p style="margin-top:14px">PC 주소나 PIN 이 바뀌면 ② 만 다시 누르면 됩니다.</p>
+    <p style="margin-top:14px">처음 실행할 때 "로컬 네트워크" 접근을 물으면 <b>허용</b>하세요.
+       PC 주소나 PIN 이 바뀌면 단축어의 URL 만 새 주소로 바꾸면 됩니다 (Tailscale 주소는 바뀌지 않습니다).</p>
+    <div class="hint" id="copy-msg"></div>
     <button class="close" id="ios-close">닫기</button>
   </div>
 
@@ -382,11 +387,33 @@ REMOTE_HTML = """<!doctype html>
   // 단축어는 "http://PC주소:포트/ACTION?token=PIN" 을 저장해 두고 ACTION 을 next/prev 로 바꿔 호출한다.
   const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
                 (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  // 보안 연결(https)이 아닌 페이지에서는 navigator.clipboard 가 없어서 textarea 선택 방식으로 복사
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.contentEditable = "true"; ta.readOnly = false;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";   // 16px: 확대 방지
+    document.body.appendChild(ta);
+    const range = document.createRange(); range.selectNodeContents(ta);        // iOS Safari 는 range 선택 필요
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    return ok;
+  }
   if (isIOS) {
     $("ios-open").hidden = false;
-    const template = location.protocol + "//" + location.host + "/ACTION" + tq();
-    $("sc-setup").href = "shortcuts://run-shortcut?name=" + encodeURIComponent("VolumePPT-Next") +
-                         "&input=text&text=" + encodeURIComponent(template);
+    const urlFor = (action) => location.protocol + "//" + location.host + "/" + action + tq();
+    document.querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const url = urlFor(el.dataset.copy);
+      const ok = await copyText(url);
+      $("copy-msg").textContent = ok ? "복사됨: " + url : "자동 복사가 안 됐습니다. 아래 주소를 길게 눌러 복사하세요:\\n" + url;
+      if (ok) { const t = el.textContent; el.textContent = "✓ 복사됨"; setTimeout(() => (el.textContent = t), 1500); }
+    }));
     $("ios-open").addEventListener("click", () => { $("ios").hidden = false; });
     $("ios-close").addEventListener("click", () => { $("ios").hidden = true; });
   }
@@ -395,9 +422,6 @@ REMOTE_HTML = """<!doctype html>
 </html>
 """
 
-
-# 아이폰 단축어 (Apple 서명본, GitHub Releases 에 빌드마다 올라감)
-SHORTCUT_URL = "https://github.com/psinserver-jpg/VolumePPT/releases/latest/download/VolumePPT-{}.shortcut"
 
 MANIFEST = json.dumps({
     "name": "VolumePPT 리모컨",
@@ -486,9 +510,7 @@ class RemoteServer:
         client = req.client_address[0]
 
         if path in ("/", "/index.html"):
-            html = (REMOTE_HTML.replace("__HAS_APK__", "true" if self.apk_path else "false")
-                    .replace("__SC_NEXT__", SHORTCUT_URL.format("Next"))
-                    .replace("__SC_PREV__", SHORTCUT_URL.format("Prev")))
+            html = REMOTE_HTML.replace("__HAS_APK__", "true" if self.apk_path else "false")
             return req._reply(200, html, "text/html; charset=utf-8")
 
         if path == "/manifest.json":
