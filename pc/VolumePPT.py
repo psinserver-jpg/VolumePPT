@@ -145,68 +145,187 @@ REMOTE_HTML = """<!doctype html>
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111317">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="VolumePPT">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon.png">
 <title>VolumePPT 리모컨</title>
 <style>
-  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; user-select:none; }
-  html,body { margin:0; height:100%; background:#111; color:#eee;
+  :root { --bg:#111317; --card:#1f232b; --fg:#f2f3f5; --muted:#8b919c; --accent:#4f8cff; --ok:#3ecf8e; --err:#ff6b6b; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); overscroll-behavior:none;
               font-family:system-ui,-apple-system,"Apple SD Gothic Neo","Malgun Gothic",sans-serif; }
-  body { display:flex; flex-direction:column; padding:16px; gap:12px; }
-  .bar { display:flex; gap:8px; }
-  .bar a { flex:1; text-align:center; padding:12px 8px; border-radius:12px; background:#4f8cff;
-           color:#fff; text-decoration:none; font-size:15px; font-weight:600; }
-  .bar a.sub { background:#2a2a2a; }
-  .hint { text-align:center; font-size:13px; opacity:.65; line-height:1.5; }
-  button { flex:1; border:0; border-radius:20px; background:#2a2a2a; color:#eee; font-size:28px; font-weight:700; }
-  button:active { background:#4f8cff; }
-  #next { flex:2; }
-  #status { text-align:center; font-size:14px; min-height:1.3em; }
+  body { display:flex; flex-direction:column; gap:10px; touch-action:manipulation;
+         padding:max(12px, env(safe-area-inset-top)) 16px max(12px, env(safe-area-inset-bottom)); }
+  .top { display:flex; align-items:center; gap:8px; font-size:14px; }
+  .dot { width:10px; height:10px; border-radius:50%; background:var(--muted); flex:none; }
+  .dot.ok { background:var(--ok); } .dot.err { background:var(--err); }
+  .top .count { margin-left:auto; color:var(--muted); }
+  .pad { flex:1; border:0; border-radius:22px; background:var(--card); color:var(--fg);
+         font:inherit; font-size:30px; font-weight:700; display:flex; flex-direction:column;
+         align-items:center; justify-content:center; gap:6px; transition:background .08s; }
+  .pad small { font-size:13px; font-weight:400; color:var(--muted); }
+  .pad.hit { background:var(--accent); } .pad.hit small { color:#fff; }
+  #next { flex:2.2; }
+  .tools { display:flex; gap:8px; }
+  .tool { flex:1; border:0; border-radius:14px; background:var(--card); color:var(--fg); font:inherit;
+          font-size:14px; padding:12px 8px; text-align:center; text-decoration:none; }
+  .tool.on { background:var(--accent); }
+  .hint { font-size:12px; color:var(--muted); text-align:center; line-height:1.5; min-height:1.5em; }
 </style>
 </head>
 <body>
-  <div class="bar">
-    <a id="open-app" href="#">📱 앱으로 연결 (볼륨키 사용)</a>
-    <a id="get-apk" class="sub" href="/app.apk" hidden>안드로이드 앱 받기</a>
+  <div class="top">
+    <span class="dot" id="dot"></span><span id="state">연결 확인 중…</span>
+    <span class="count" id="count"></span>
   </div>
-  <div class="hint">앱이 있으면 위 버튼을 누르세요. 앱 없이 아래 버튼으로도 넘길 수 있습니다.</div>
-  <div id="status"></div>
-  <button id="next">다음 ▶</button>
-  <button id="prev">◀ 이전</button>
+
+  <button class="pad" id="next">다음 ▶<small>탭 · 왼쪽으로 밀기</small></button>
+  <button class="pad" id="prev">◀ 이전<small>탭 · 오른쪽으로 밀기</small></button>
+
+  <div class="tools">
+    <button class="tool" id="media">🔒 잠금화면 · 이어폰 버튼 켜기</button>
+    <a class="tool" id="apk" href="/app.apk" hidden>볼륨버튼 앱(선택)</a>
+  </div>
+  <div class="hint" id="hint">화면을 탭하거나 밀어서 슬라이드를 넘기세요</div>
+
 <script>
+  // ── 설정 ──────────────────────────────────────────────
   const qs = new URLSearchParams(location.search);
   let token = qs.get("token") || "";
   try { if (token) localStorage.setItem("token", token); else token = localStorage.getItem("token") || ""; } catch (e) {}
-  const status = document.getElementById("status");
-  const isAndroid = /Android/i.test(navigator.userAgent);
-  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  if (qs.has("token")) history.replaceState(null, "", location.pathname);   // 주소창에서 PIN 숨기기
+  const $ = (id) => document.getElementById(id);
+  const tq = () => (token ? "?token=" + encodeURIComponent(token) : "");
+  if (/Android/i.test(navigator.userAgent) && __HAS_APK__) $("apk").hidden = false;
 
-  document.getElementById("open-app").href =
-    "volumeppt://connect?host=" + encodeURIComponent(location.host) + "&token=" + encodeURIComponent(token);
-  if (isAndroid && __HAS_APK__) document.getElementById("get-apk").hidden = false;
-  if (!isAndroid && !isIOS) document.querySelector(".bar").hidden = true;
-
-  async function send(action) {
-    if (navigator.vibrate) navigator.vibrate(30);
-    try {
-      const r = await fetch("/" + action + (token ? "?token=" + encodeURIComponent(token) : ""));
-      status.textContent = r.ok ? (action === "next" ? "다음 ▶" : "◀ 이전")
-                         : r.status === 403 ? "PIN 이 맞지 않습니다. PC 화면의 QR 을 다시 찍어 주세요" : "오류: " + r.status;
-    } catch (e) {
-      status.textContent = "PC에 연결할 수 없습니다";
-    }
+  // ── 연결 상태 ──────────────────────────────────────────
+  let count = 0;
+  function setState(ok, text) {
+    $("dot").className = "dot " + (ok ? "ok" : "err");
+    $("state").textContent = text;
   }
-  document.getElementById("next").onclick = () => send("next");
-  document.getElementById("prev").onclick = () => send("prev");
+  async function ping() {
+    try {
+      const r = await fetch("/ping" + tq(), { cache: "no-store" });
+      if (r.ok) setState(true, "PC 연결됨");
+      else if (r.status === 403) setState(false, "PIN 이 맞지 않습니다 — PC 의 QR 을 다시 찍어 주세요");
+      else setState(false, "오류 " + r.status);
+    } catch (e) { setState(false, "PC 에 연결할 수 없습니다"); }
+  }
+  ping(); setInterval(ping, 3000);
 
-  // 일부 안드로이드 브라우저 / 블루투스 셔터 리모컨은 볼륨키를 키 이벤트로 전달함
+  // ── 슬라이드 넘기기 ────────────────────────────────────
+  async function send(action) {
+    const pad = $(action);
+    pad.classList.add("hit"); setTimeout(() => pad.classList.remove("hit"), 150);
+    if (navigator.vibrate) navigator.vibrate(25);
+    try {
+      const r = await fetch("/" + action + tq(), { cache: "no-store" });
+      if (r.ok) { setState(true, action === "next" ? "다음 ▶" : "◀ 이전"); $("count").textContent = "넘긴 횟수 " + (++count); }
+      else if (r.status === 403) setState(false, "PIN 이 맞지 않습니다 — PC 의 QR 을 다시 찍어 주세요");
+      else setState(false, "오류 " + r.status);
+    } catch (e) { setState(false, "PC 에 연결할 수 없습니다"); }
+  }
+
+  // 탭
+  let swiped = false;
+  $("next").addEventListener("click", () => { if (!swiped) send("next"); });
+  $("prev").addEventListener("click", () => { if (!swiped) send("prev"); });
+
+  // 스와이프 (화면 어디서나): 왼쪽으로 밀기 = 다음, 오른쪽으로 밀기 = 이전
+  let sx = 0, sy = 0;
+  document.addEventListener("touchstart", (e) => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; swiped = false; }, { passive: true });
+  document.addEventListener("touchend", (e) => {
+    const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+    if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+      swiped = true; setTimeout(() => (swiped = false), 400);
+      send(dx < 0 ? "next" : "prev");
+    }
+  }, { passive: true });
+
+  // 키보드 / 블루투스 셔터·프레젠터 (일부 기기는 볼륨키도 여기로 들어옴)
   document.addEventListener("keydown", (e) => {
-    if (["AudioVolumeUp", "VolumeUp", "ArrowRight", "PageDown", " "].includes(e.key)) { e.preventDefault(); send("next"); }
-    else if (["AudioVolumeDown", "VolumeDown", "ArrowLeft", "PageUp"].includes(e.key)) { e.preventDefault(); send("prev"); }
+    if (["AudioVolumeUp", "VolumeUp", "ArrowRight", "ArrowDown", "PageDown", " ", "Enter"].includes(e.key)) { e.preventDefault(); send("next"); }
+    else if (["AudioVolumeDown", "VolumeDown", "ArrowLeft", "ArrowUp", "PageUp"].includes(e.key)) { e.preventDefault(); send("prev"); }
   });
+
+  // ── 잠금화면 · 이어폰 버튼 (Media Session) ─────────────
+  // 소리 없는 오디오를 재생해 두면 잠금화면/알림창의 ⏭ ⏮ 와 이어폰 버튼이 슬라이드를 넘긴다.
+  let audio = null;
+  function silentWav(seconds) {
+    const rate = 8000, n = rate * seconds, buf = new ArrayBuffer(44 + n), v = new DataView(buf);
+    const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+    w(0, "RIFF"); v.setUint32(4, 36 + n, true); w(8, "WAVE"); w(12, "fmt ");
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+    v.setUint32(24, rate, true); v.setUint32(28, rate, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true);
+    w(36, "data"); v.setUint32(40, n, true);
+    for (let i = 0; i < n; i++) v.setUint8(44 + i, 128);
+    return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+  }
+  async function toggleMedia() {
+    const btn = $("media");
+    if (audio) {
+      audio.pause(); audio = null;
+      btn.classList.remove("on"); btn.textContent = "🔒 잠금화면 · 이어폰 버튼 켜기";
+      $("hint").textContent = "화면을 탭하거나 밀어서 슬라이드를 넘기세요";
+      return;
+    }
+    if (!("mediaSession" in navigator)) { $("hint").textContent = "이 브라우저는 잠금화면 버튼을 지원하지 않습니다"; return; }
+    audio = new Audio(silentWav(30));
+    audio.loop = true;
+    try { await audio.play(); } catch (e) { audio = null; $("hint").textContent = "오디오를 시작할 수 없습니다: " + e.message; return; }
+    navigator.mediaSession.metadata = new MediaMetadata({ title: "VolumePPT 리모컨", artist: "⏭ 다음 슬라이드 · ⏮ 이전 슬라이드" });
+    navigator.mediaSession.setActionHandler("nexttrack", () => send("next"));
+    navigator.mediaSession.setActionHandler("previoustrack", () => send("prev"));
+    navigator.mediaSession.setActionHandler("play", () => audio && audio.play());
+    navigator.mediaSession.setActionHandler("pause", () => audio && audio.play());   // 멈추지 않게 유지
+    navigator.mediaSession.playbackState = "playing";
+    btn.classList.add("on"); btn.textContent = "🔒 잠금화면 버튼 사용 중";
+    $("hint").textContent = "화면을 꺼도 잠금화면의 ⏭ ⏮ 또는 이어폰 버튼으로 넘길 수 있습니다";
+  }
+  $("media").addEventListener("click", toggleMedia);
 </script>
 </body>
 </html>
 """
+
+
+MANIFEST = json.dumps({
+    "name": "VolumePPT 리모컨",
+    "short_name": "VolumePPT",
+    "start_url": "/",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#111317",
+    "theme_color": "#111317",
+    "icons": [{"src": "/icon.png", "sizes": "180x180", "type": "image/png"}],
+}, ensure_ascii=False)
+
+
+def make_icon_png(size=180):
+    """홈 화면 아이콘 (파란 배경에 흰 ▶). 외부 라이브러리 없이 PNG 를 만든다."""
+    import struct
+    import zlib
+    rows = []
+    for y in range(size):
+        row = bytearray([0])
+        for x in range(size):
+            # 가운데 삼각형: x 는 35%~70%, y 는 x 에 비례해 좁아짐
+            cx, cy = x / size, abs(y / size - 0.5)
+            inside = 0.36 <= cx <= 0.70 and cy <= (0.70 - cx) * 0.75
+            row += bytes((255, 255, 255) if inside else (0x4F, 0x8C, 0xFF))
+        rows.append(bytes(row))
+    raw = zlib.compress(b"".join(rows), 9)
+
+    def chunk(tag, data):
+        return struct.pack(">I", len(data)) + tag + data + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", raw) + chunk(b"IEND", b""))
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +342,8 @@ class RemoteServer:
         self.events = queue.Queue()     # (종류, 메시지)
         self.apk_path = resource_path("app.apk")
         self._last = 0.0
+        self._seen = {}                 # 휴대폰별 마지막 접속 시각 (연결 알림 중복 방지)
+        self._icon = make_icon_png()
         self._httpd = None
 
     def start(self):
@@ -262,8 +383,13 @@ class RemoteServer:
 
         if path in ("/", "/index.html"):
             html = REMOTE_HTML.replace("__HAS_APK__", "true" if self.apk_path else "false")
-            self.events.put(("connect", f"{client} 웹 리모컨 접속"))
             return req._reply(200, html, "text/html; charset=utf-8")
+
+        if path == "/manifest.json":
+            return req._reply(200, MANIFEST, "application/manifest+json; charset=utf-8")
+
+        if path == "/icon.png":
+            return req._reply(200, self._icon, "image/png")
 
         if path == "/app.apk":
             if not self.apk_path:
@@ -280,7 +406,11 @@ class RemoteServer:
                 return req._reply(403, json.dumps({"ok": False, "error": "bad token"}))
 
             if path == "/ping":
-                self.events.put(("connect", f"{client} 연결됨"))
+                # 웹 리모컨은 3초마다 ping 하므로, 새로 연결됐을 때만 알린다
+                now = time.monotonic()
+                if now - self._seen.get(client, -1e9) > 15:
+                    self.events.put(("connect", f"{client} 휴대폰 연결됨"))
+                self._seen[client] = now
                 return req._reply(200, json.dumps({"ok": True, "app": APP_NAME}))
 
             now = time.monotonic()
@@ -332,7 +462,7 @@ class App:
         pad.pack()
 
         label(pad, "VolumePPT", 18, bold=True).pack(anchor="w")
-        label(pad, "휴대폰 볼륨 ▲ 다음 슬라이드  ·  볼륨 ▼ 이전 슬라이드", 10, self.MUTED).pack(anchor="w", pady=(0, 12))
+        label(pad, "휴대폰으로 PowerPoint 슬라이드를 넘기는 무선 리모컨", 10, self.MUTED).pack(anchor="w", pady=(0, 12))
 
         card = tk.Frame(pad, bg=self.CARD, padx=16, pady=16)
         card.pack(fill="x")
@@ -341,9 +471,9 @@ class App:
         self.qr.grid(row=0, column=0, rowspan=6, padx=(0, 16))
 
         label(card, "① 휴대폰 카메라로 QR 을 찍으세요", 11, bold=True).grid(row=0, column=1, sticky="w")
-        label(card, "같은 Wi-Fi 에 연결되어 있어야 합니다", 9, self.MUTED).grid(row=1, column=1, sticky="w")
-        label(card, "② 열린 화면에서 [앱으로 연결] 을 누르세요", 11, bold=True).grid(row=2, column=1, sticky="w", pady=(10, 0))
-        label(card, "앱이 없으면 화면 버튼으로 넘길 수 있습니다", 9, self.MUTED).grid(row=3, column=1, sticky="w")
+        label(card, "휴대폰과 이 PC 가 같은 Wi-Fi 여야 합니다", 9, self.MUTED).grid(row=1, column=1, sticky="w")
+        label(card, "② 열린 화면을 탭하거나 밀어서 넘기세요", 11, bold=True).grid(row=2, column=1, sticky="w", pady=(10, 0))
+        label(card, "앱 설치 없이 브라우저에서 바로 동작합니다", 9, self.MUTED).grid(row=3, column=1, sticky="w")
 
         info = tk.Frame(card, bg=self.CARD)
         info.grid(row=4, column=1, sticky="w", pady=(14, 0))
