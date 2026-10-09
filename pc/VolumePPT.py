@@ -17,6 +17,7 @@
 """
 
 import argparse
+import ipaddress
 import json
 import os
 import queue
@@ -52,7 +53,7 @@ def resource_path(name):
 
 
 def load_config():
-    cfg = {"port": DEFAULT_PORT, "use_pin": True, "pin": f"{random.randint(0, 9999):04d}"}
+    cfg = {"port": DEFAULT_PORT, "use_pin": True, "pin": f"{random.randint(0, 9999):04d}", "host": ""}
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg.update(json.load(f))
@@ -69,24 +70,72 @@ def save_config(cfg):
         pass
 
 
+TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def is_tailscale(ip):
+    try:
+        return ipaddress.ip_address(ip) in TAILSCALE_NET
+    except ValueError:
+        return False
+
+
+def tailscale_ip():
+    """이 PC 의 Tailscale IPv4 주소 (100.x.y.z). Tailscale 이 꺼져 있으면 None."""
+    # 1) Tailscale 이 켜져 있으면 100.100.100.100(Tailscale DNS) 로 가는 경로의 출발 주소가 곧 Tailscale IP
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("100.100.100.100", 53))  # 실제로 패킷을 보내지는 않음
+        ip = s.getsockname()[0]
+        s.close()
+        if is_tailscale(ip):
+            return ip
+    except OSError:
+        pass
+    # 2) tailscale 명령으로 확인
+    candidates = ["tailscale",
+                  r"C:\Program Files\Tailscale\tailscale.exe",
+                  "/Applications/Tailscale.app/Contents/MacOS/Tailscale"]
+    flags = 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW: 검은 창 안 띄움
+    for exe in candidates:
+        try:
+            out = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True,
+                                 timeout=3, creationflags=flags).stdout.split()
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for ip in out:
+            if is_tailscale(ip):
+                return ip
+    return None
+
+
 def local_ips():
-    """같은 Wi-Fi 의 휴대폰이 접속할 수 있는 PC 의 IP 목록 (가장 유력한 것이 맨 앞)."""
-    primary = None
+    """휴대폰이 접속할 수 있는 PC 의 IP 목록. Tailscale IP 가 있으면 맨 앞, 그다음 Wi-Fi/LAN IP."""
+    found = []
+    ts = tailscale_ip()
+    if ts:
+        found.append(ts)
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))  # 실제로 패킷을 보내지는 않음
-        primary = s.getsockname()[0]
+        found.append(s.getsockname()[0])
         s.close()
     except OSError:
         pass
-    ips = set()
     try:
         for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
-            ips.add(info[4][0])
+            found.append(info[4][0])
     except OSError:
         pass
-    ips = sorted(ip for ip in ips if not ip.startswith("127.") and ip != primary)
-    return ([primary] if primary else []) + ips
+    ips = []
+    for ip in found:
+        if ip not in ips and not ip.startswith("127."):
+            ips.append(ip)
+    return ips
+
+
+def ip_label(ip):
+    return f"{ip}  (Tailscale)" if is_tailscale(ip) else ip
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +225,21 @@ REMOTE_HTML = """<!doctype html>
           font-size:14px; padding:12px 8px; text-align:center; text-decoration:none; }
   .tool.on { background:var(--accent); }
   .hint { font-size:12px; color:var(--muted); text-align:center; line-height:1.5; min-height:1.5em; }
+  /* 아이폰 단축어 설치 패널 */
+  #ios { position:fixed; inset:0; background:var(--bg); overflow-y:auto; z-index:10;
+         padding:max(16px, env(safe-area-inset-top)) 20px max(20px, env(safe-area-inset-bottom)); }
+  #ios h2 { font-size:20px; margin:4px 0 6px; }
+  #ios p { color:var(--muted); font-size:14px; line-height:1.55; margin:0 0 14px; }
+  #ios ol { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:12px; }
+  #ios li { background:var(--card); border-radius:16px; padding:14px; }
+  #ios li > b { display:block; font-size:15px; margin-bottom:4px; }
+  #ios li span { display:block; color:var(--muted); font-size:13px; line-height:1.5; }
+  #ios .go { display:block; margin-top:10px; padding:12px; border-radius:12px; background:var(--accent);
+             color:#fff; text-align:center; text-decoration:none; font-weight:600; font-size:15px; }
+  #ios .go.sub { background:#2c313b; }
+  #copy-msg { -webkit-user-select:text; user-select:text; white-space:pre-line; word-break:break-all; font-size:13px; }
+  #ios .close { width:100%; margin-top:16px; padding:14px; border:0; border-radius:14px; background:#2c313b;
+                color:var(--fg); font:inherit; font-size:15px; }
 </style>
 </head>
 <body>
@@ -190,8 +254,37 @@ REMOTE_HTML = """<!doctype html>
   <div class="tools">
     <button class="tool" id="media">🔒 잠금화면 · 이어폰 버튼 켜기</button>
     <a class="tool" id="apk" href="/app.apk" hidden>볼륨버튼 앱(선택)</a>
+    <button class="tool" id="ios-open" hidden>⚡ 동작 버튼 설정</button>
   </div>
   <div class="hint" id="hint">화면을 탭하거나 밀어서 슬라이드를 넘기세요</div>
+
+  <div id="ios" hidden>
+    <h2>⚡ 아이폰 버튼으로 넘기기</h2>
+    <p>단축어 2개를 만들어 두면 <b>동작 버튼</b>이나 <b>뒷면 탭</b>으로 슬라이드를 넘길 수 있습니다. 처음 한 번만 하면 됩니다 (단축어당 30초).</p>
+    <ol>
+      <li><b>① 「다음」 단축어 만들기</b>
+        <span>1. 아래 <b>[주소 복사]</b> → <b>[단축어 앱 열기]</b><br>
+              2. <b>동작 추가</b> → 검색창에 <b>URL</b> → <b>URL 내용 가져오기</b><br>
+              3. 파란 <b>URL</b> 글자를 눌러 지우고 <b>붙여넣기</b><br>
+              4. 맨 위 이름을 <b>PPT 다음</b> 으로 바꾸고 <b>완료</b></span>
+        <a class="go" href="#" data-copy="next">다음 주소 복사</a>
+        <a class="go sub" href="shortcuts://create-shortcut">단축어 앱 열기</a>
+      </li>
+      <li><b>② 「이전」 단축어 만들기</b>
+        <span>같은 방법으로, 이름은 <b>PPT 이전</b></span>
+        <a class="go" href="#" data-copy="prev">이전 주소 복사</a>
+        <a class="go sub" href="shortcuts://create-shortcut">단축어 앱 열기</a>
+      </li>
+      <li><b>③ 버튼에 연결</b>
+        <span><b>설정 → 동작 버튼 → 단축어</b> → PPT 다음<br>
+              <b>설정 → 손쉬운 사용 → 터치 → 뒷면 탭 → 이중 탭</b> → PPT 이전</span>
+      </li>
+    </ol>
+    <p style="margin-top:14px">처음 실행할 때 "로컬 네트워크" 접근을 물으면 <b>허용</b>하세요.
+       PC 주소나 PIN 이 바뀌면 단축어의 URL 만 새 주소로 바꾸면 됩니다 (Tailscale 주소는 바뀌지 않습니다).</p>
+    <div class="hint" id="copy-msg"></div>
+    <button class="close" id="ios-close">닫기</button>
+  </div>
 
 <script>
   // ── 설정 ──────────────────────────────────────────────
@@ -289,6 +382,41 @@ REMOTE_HTML = """<!doctype html>
     $("hint").textContent = "화면을 꺼도 잠금화면의 ⏭ ⏮ 또는 이어폰 버튼으로 넘길 수 있습니다";
   }
   $("media").addEventListener("click", toggleMedia);
+
+  // ── 아이폰 단축어 (동작 버튼 · 뒷면 탭) ─────────────────
+  // 단축어는 "http://PC주소:포트/ACTION?token=PIN" 을 저장해 두고 ACTION 을 next/prev 로 바꿔 호출한다.
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent) ||
+                (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  // 보안 연결(https)이 아닌 페이지에서는 navigator.clipboard 가 없어서 textarea 선택 방식으로 복사
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.contentEditable = "true"; ta.readOnly = false;
+    ta.style.cssText = "position:fixed;top:0;left:0;opacity:0;font-size:16px";   // 16px: 확대 방지
+    document.body.appendChild(ta);
+    const range = document.createRange(); range.selectNodeContents(ta);        // iOS Safari 는 range 선택 필요
+    const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    ta.setSelectionRange(0, text.length);
+    let ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    return ok;
+  }
+  if (isIOS) {
+    $("ios-open").hidden = false;
+    const urlFor = (action) => location.protocol + "//" + location.host + "/" + action + tq();
+    document.querySelectorAll("[data-copy]").forEach((el) => el.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const url = urlFor(el.dataset.copy);
+      const ok = await copyText(url);
+      $("copy-msg").textContent = ok ? "복사됨: " + url : "자동 복사가 안 됐습니다. 아래 주소를 길게 눌러 복사하세요:\\n" + url;
+      if (ok) { const t = el.textContent; el.textContent = "✓ 복사됨"; setTimeout(() => (el.textContent = t), 1500); }
+    }));
+    $("ios-open").addEventListener("click", () => { $("ios").hidden = false; });
+    $("ios-close").addEventListener("click", () => { $("ios").hidden = true; });
+  }
 </script>
 </body>
 </html>
@@ -431,6 +559,17 @@ def phone_url(ip, port, pin):
     return url + (f"?token={quote(pin)}" if pin else "")
 
 
+def action_url(ip, port, pin, action):
+    """아이폰 단축어 'URL 내용 가져오기' 에 넣을 주소."""
+    url = f"http://{ip}:{port}/{action}"
+    return url + (f"?token={quote(pin)}" if pin else "")
+
+
+def pick_ip(cfg):
+    ips = local_ips() or ["127.0.0.1"]
+    return cfg["host"] if cfg.get("host") in ips else ips[0]
+
+
 # ---------------------------------------------------------------------------
 # 창 (tkinter)
 # ---------------------------------------------------------------------------
@@ -444,7 +583,7 @@ class App:
         self.cfg = cfg
         self.send_key = make_key_sender(dry_run)
         self.server = None
-        self.ips = local_ips() or ["127.0.0.1"]
+        self.ips = []
 
         self.root = root = tk.Tk()
         root.title(APP_NAME)
@@ -471,29 +610,26 @@ class App:
         self.qr.grid(row=0, column=0, rowspan=6, padx=(0, 16))
 
         label(card, "① 휴대폰 카메라로 QR 을 찍으세요", 11, bold=True).grid(row=0, column=1, sticky="w")
-        label(card, "휴대폰과 이 PC 가 같은 Wi-Fi 여야 합니다", 9, self.MUTED).grid(row=1, column=1, sticky="w")
+        self.net_hint = label(card, "", 9, self.MUTED, justify="left")
+        self.net_hint.grid(row=1, column=1, sticky="w")
         label(card, "② 열린 화면을 탭하거나 밀어서 넘기세요", 11, bold=True).grid(row=2, column=1, sticky="w", pady=(10, 0))
         label(card, "앱 설치 없이 브라우저에서 바로 동작합니다", 9, self.MUTED).grid(row=3, column=1, sticky="w")
 
         info = tk.Frame(card, bg=self.CARD)
         info.grid(row=4, column=1, sticky="w", pady=(14, 0))
         label(info, "주소", 9, self.MUTED).grid(row=0, column=0, sticky="w", padx=(0, 10))
-        self.addr_var = tk.StringVar()
-        if len(self.ips) > 1:
-            self.ip_var = tk.StringVar(value=self.ips[0])
-            menu = tk.OptionMenu(info, self.ip_var, *self.ips, command=lambda _: self.refresh())
-            menu.configure(bg=self.CARD, fg=self.FG, activebackground=self.CARD, highlightthickness=0,
-                           bd=0, font=(font, 13, "bold"))
-            menu.grid(row=0, column=1, sticky="w")
-            self.port_label = label(info, "", 13, bold=True)
-            self.port_label.grid(row=0, column=2, sticky="w")
-        else:
-            self.ip_var = tk.StringVar(value=self.ips[0])
-            self.port_label = label(info, "", 13, bold=True)
-            self.port_label.grid(row=0, column=1, sticky="w")
+        self.ip_var = tk.StringVar()
+        self.ip_menu = tk.OptionMenu(info, self.ip_var, "")
+        self.ip_menu.configure(bg=self.CARD, fg=self.FG, activebackground=self.CARD, activeforeground=self.FG,
+                               highlightthickness=0, bd=0, font=(font, 13, "bold"))
+        self.ip_menu.grid(row=0, column=1, sticky="w")
+        self.port_label = label(info, "", 13, bold=True)
+        self.port_label.grid(row=0, column=2, sticky="w")
+        tk.Button(info, text="↻", command=self.reload_ips, font=(font, 10), relief="flat", bg=self.BG,
+                  fg=self.FG, activebackground=self.ACCENT, padx=6).grid(row=0, column=3, padx=(8, 0))
         label(info, "PIN", 9, self.MUTED).grid(row=1, column=0, sticky="w", padx=(0, 10))
         self.pin_label = label(info, "", 13, bold=True)
-        self.pin_label.grid(row=1, column=1, sticky="w", columnspan=2)
+        self.pin_label.grid(row=1, column=1, sticky="w", columnspan=3)
 
         opts = tk.Frame(card, bg=self.CARD)
         opts.grid(row=5, column=1, sticky="w", pady=(10, 0))
@@ -503,6 +639,18 @@ class App:
                        activebackground=self.CARD, activeforeground=self.FG, font=(font, 9)).pack(side="left")
         tk.Button(opts, text="새 PIN", command=self.new_pin, font=(font, 9), relief="flat",
                   bg=self.BG, fg=self.FG, activebackground=self.ACCENT, padx=8).pack(side="left", padx=(6, 0))
+
+        sc = tk.Frame(pad, bg=self.CARD, padx=16, pady=10)
+        sc.pack(fill="x", pady=(10, 0))
+        label(sc, "아이폰 단축어 · 동작 버튼용 주소", 10, bold=True).grid(row=0, column=0, columnspan=3, sticky="w")
+        self.sc_urls = {}
+        for i, (action, name) in enumerate((("next", "다음"), ("prev", "이전")), start=1):
+            label(sc, name, 9, self.MUTED).grid(row=i, column=0, sticky="w", padx=(0, 10))
+            self.sc_urls[action] = label(sc, "", 10)
+            self.sc_urls[action].grid(row=i, column=1, sticky="w")
+            tk.Button(sc, text="복사", command=lambda a=action: self.copy_url(a), font=(font, 9), relief="flat",
+                      bg=self.BG, fg=self.FG, activebackground=self.ACCENT, padx=8).grid(row=i, column=2, padx=(10, 0), pady=1)
+        sc.grid_columnconfigure(1, weight=1)
 
         status_row = tk.Frame(pad, bg=self.BG)
         status_row.pack(fill="x", pady=(14, 6))
@@ -521,6 +669,7 @@ class App:
               9, self.MUTED).pack(anchor="w", pady=(10, 0))
 
         self.slides = 0
+        self.reload_ips(redraw=False)
         self.start_server()
         self.root.after(100, self.poll)
 
@@ -543,11 +692,45 @@ class App:
         self.set_status("실행 중 — 휴대폰 연결을 기다리는 중", self.OK)
         self.refresh()
 
+    def current_ip(self):
+        return self.ip_var.get().split()[0]
+
+    def reload_ips(self, redraw=True):
+        """IP 목록을 다시 찾는다. Tailscale 을 실행기보다 늦게 켰을 때 ↻ 로 갱신."""
+        self.ips = local_ips() or ["127.0.0.1"]
+        saved = self.cfg.get("host")
+        chosen = saved if saved in self.ips else self.ips[0]
+        menu = self.ip_menu["menu"]
+        menu.delete(0, "end")
+        for ip in self.ips:
+            menu.add_command(label=ip_label(ip), command=lambda ip=ip: self.choose_ip(ip))
+        self.ip_var.set(ip_label(chosen))
+        if redraw:
+            self.refresh()
+
+    def choose_ip(self, ip):
+        self.ip_var.set(ip_label(ip))
+        self.cfg["host"] = ip
+        save_config(self.cfg)
+        self.refresh()
+
     def refresh(self):
-        url = phone_url(self.ip_var.get(), self.cfg["port"], self.pin)
-        self.port_label.configure(text=("" if len(self.ips) > 1 else self.ip_var.get()) + f":{self.cfg['port']}")
+        ip = self.current_ip()
+        url = phone_url(ip, self.cfg["port"], self.pin)
+        self.port_label.configure(text=f":{self.cfg['port']}")
         self.pin_label.configure(text=self.pin or "사용 안 함")
+        if is_tailscale(ip):
+            self.net_hint.configure(text="Tailscale 주소 — 휴대폰에서 Tailscale 을 켜 두면\nWi-Fi 가 달라도 연결됩니다")
+        else:
+            self.net_hint.configure(text="휴대폰과 이 PC 가 같은 Wi-Fi 여야 합니다")
+        for action, lbl in self.sc_urls.items():
+            lbl.configure(text=action_url(ip, self.cfg["port"], self.pin, action))
         self.draw_qr(url)
+
+    def copy_url(self, action):
+        self.root.clipboard_clear()
+        self.root.clipboard_append(action_url(self.current_ip(), self.cfg["port"], self.pin, action))
+        self.set_status(("다음" if action == "next" else "이전") + " 주소를 복사했습니다", self.OK)
 
     def draw_qr(self, text):
         c = self.qr
@@ -628,19 +811,26 @@ def run_console(cfg, dry_run):
     send = make_key_sender(dry_run)
     server = RemoteServer(cfg["port"], pin, send)
     server.start()
-    print("=" * 52)
+    ip = pick_ip(cfg)
+    print("=" * 60)
     print(" VolumePPT 실행 중   (종료: Ctrl+C)")
-    print("=" * 52)
-    for ip in local_ips() or ["<PC의 IP 주소>"]:
-        print(f" 휴대폰 브라우저/카메라로:  {phone_url(ip, cfg['port'], pin)}")
-    print(f" 앱에 직접 입력:  주소 {(local_ips() or ['?'])[0]}:{cfg['port']}   PIN {pin or '없음'}")
+    print("=" * 60)
+    print(f" 주소: {ip_label(ip)}:{cfg['port']}   PIN: {pin or '없음'}")
+    print(" 휴대폰 카메라로 아래 QR 을 찍으세요" +
+          (" (휴대폰에서 Tailscale 켜기)" if is_tailscale(ip) else " (같은 Wi-Fi)"))
     try:
         import qrcode
         q = qrcode.QRCode(border=1)
-        q.add_data(phone_url((local_ips() or ["127.0.0.1"])[0], cfg["port"], pin))
+        q.add_data(phone_url(ip, cfg["port"], pin))
         q.print_ascii(invert=True)
     except Exception:
-        pass
+        print(f" {phone_url(ip, cfg['port'], pin)}")
+    print(" 아이폰 단축어 · 동작 버튼용 주소:")
+    print(f"   다음  {action_url(ip, cfg['port'], pin, 'next')}")
+    print(f"   이전  {action_url(ip, cfg['port'], pin, 'prev')}")
+    others = [i for i in local_ips() if i != ip]
+    if others:
+        print(" 다른 주소: " + ", ".join(ip_label(i) for i in others) + "   (--host 로 선택)")
     try:
         while True:
             kind, msg = server.events.get()
@@ -654,6 +844,7 @@ def main():
     p = argparse.ArgumentParser(description="VolumePPT 통합 실행기")
     p.add_argument("--port", type=int, help=f"포트 (기본 {DEFAULT_PORT})")
     p.add_argument("--no-pin", action="store_true", help="PIN 없이 실행")
+    p.add_argument("--host", help="QR 에 넣을 PC 주소 (기본: Tailscale IP, 없으면 Wi-Fi IP)")
     p.add_argument("--nogui", action="store_true", help="창 없이 콘솔에서 실행")
     p.add_argument("--dry-run", action="store_true", help="키를 누르지 않음 (테스트용)")
     args = p.parse_args()
@@ -663,6 +854,8 @@ def main():
         cfg["port"] = args.port
     if args.no_pin:
         cfg["use_pin"] = False
+    if args.host:
+        cfg["host"] = args.host
     save_config(cfg)
 
     if not args.nogui:
